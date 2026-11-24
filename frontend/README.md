@@ -17,7 +17,7 @@ Vite dev server).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VITE_API_URL` | `http://localhost:8000` | Backend base URL |
+| `VITE_API_URL` | dev: `http://localhost:8000`; build: same origin | Backend base URL. Leave unset for builds the backend serves. |
 | `VITE_MAX_ROWS` | `20` | Shown in the guide; keep in sync with `MAX_CSV_ROWS` |
 | `VITE_MAX_UPLOAD_BYTES` | `65536` | Checked before upload; keep in sync with `MAX_UPLOAD_BYTES` |
 

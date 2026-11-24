@@ -21,27 +21,13 @@ when every row was created.
 
 ## Quick start
 
-**Everything (API + web UI) in one container:**
-
 ```bash
-docker build -f Dockerfile.fullstack -t hospital-app . && docker run --rm -p 8000:8000 -p 5173:5173 hospital-app
-# -> UI:  http://localhost:5173
-# -> API: http://localhost:8000/docs
-```
-
-[Dockerfile.fullstack](Dockerfile.fullstack) builds the frontend, then runs
-uvicorn (port 8000) and nginx serving the UI (port 5173) side by side. If either
-server exits, the container stops. If the API is published on a different host
-port, rebuild with `--build-arg VITE_API_URL=http://localhost:<port>`.
-
-**Backend only:**
-
-```bash
-# Docker (no local Python needed)
+# Docker: web UI and API together, no local Python or Node needed
 docker compose up --build
-# -> http://localhost:8000/docs  (interactive API docs; try the upload there)
+# -> http://localhost:8000       web UI
+# -> http://localhost:8000/docs  interactive API docs
 
-# or locally, with Python 3.12
+# or the API locally, with Python 3.12 (/ then redirects to /docs)
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --port 8000
@@ -57,7 +43,7 @@ EOF
 curl -F file=@hospitals.csv http://localhost:8000/hospitals/bulk
 ```
 
-**Web UI** (in a second terminal, with Node 20+):
+**Web UI in development** (in a second terminal, with Node 20+; hot reload):
 
 ```bash
 cd frontend
@@ -78,7 +64,7 @@ See [frontend/README.md](frontend/README.md).
 | `POST` | `/hospitals/bulk/{batch_id}/resume` | Retry a failed batch: create only the missing rows, then verify and activate. Also takes `?wait=false`. |
 | `WS` | `/hospitals/bulk/{batch_id}/ws` | Live progress: pushes the batch (same shape as `GET`) on connect and on every change, then closes (code 1000) when the run is over. Unknown batch: closes with 4404. |
 | `GET` | `/health` | Liveness check, used by Docker and Render. |
-| `GET` | `/docs` | Swagger UI (`/` redirects here). |
+| `GET` | `/docs` | Swagger UI. `/` serves the web UI when it is built in (Docker), otherwise redirects here. |
 
 ### CSV format
 
@@ -370,6 +356,7 @@ Invalid values (e.g. `DIRECTORY_MAX_CONCURRENCY=0`) stop the app from starting.
 | `MAX_UPLOAD_BYTES` | `65536` | Request body limit |
 | `SHUTDOWN_GRACE_SECONDS` | `5` | Extra wait for running batches at shutdown, after uvicorn's 20 s |
 | `MAX_STORED_BATCHES` | `1000` | Batches kept in memory |
+| `FRONTEND_DIR` | unset (`/app/frontend` in Docker) | Built web UI to serve at `/`. Unset: `/` redirects to `/docs`. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API (the frontend). Empty disables CORS. |
 | `LOG_LEVEL` | `INFO` | Log level |
 
@@ -431,9 +418,10 @@ docker run --rm -p 10000:10000 -e PORT=10000 hospital-bulk-processor
 
 What the image does, and why:
 
-- **`python:3.12-slim`, single stage.** All dependencies install from prebuilt
-  wheels, so there's no compiler toolchain for a multi-stage build to strip.
-  The app adds about 21 MB to the base image.
+- **Two stages.** A `node:22-slim` stage builds the web UI. The final
+  `python:3.12-slim` image gets only the built files (no Node), and the app
+  serves them at `/`. One process and one port serve both the UI and the API,
+  so the UI needs no API URL and no CORS.
 - **Dependencies are installed before the code is copied.** The dependency
   layer is cached and rebuilt only when `requirements.txt` changes.
 - **Runs as a non-root user** (`appuser`, uid 10001).
@@ -449,33 +437,21 @@ What the image does, and why:
 
 ## Deploying to Render
 
-[render.yaml](render.yaml) is a Render Blueprint with two free services:
+[render.yaml](render.yaml) is a Render Blueprint for one free Docker web
+service that serves both the web UI (at `/`) and the API:
 
-- **`hospital-bulk-processor`**, the API: a Docker web service;
 - `healthCheckPath: /health`;
 - `numInstances: 1` and `WEB_CONCURRENCY=1`;
 - `maxShutdownDelaySeconds: 30`;
-- auto-deploy on every commit;
-- **`hospital-bulk-ui`**, the web UI: a static site built from `frontend/`,
-  with every path served by `index.html` so deep links work.
-
-The two services are linked by two settings: the UI's `VITE_API_URL` (the
-API's URL, fixed at build time) and the API's `CORS_ORIGINS` (the UI's
-origin). Both are preset to the default URLs
-`https://hospital-bulk-processor.onrender.com` and
-`https://hospital-bulk-ui.onrender.com`.
+- auto-deploy on every commit.
 
 Render injects `PORT` (default 10000), and the container binds `0.0.0.0:$PORT`.
 
 1. Push this repository to GitHub, GitLab or Bitbucket.
 2. In Render: **New → Blueprint**, select the repository, and apply. Render
    reads `render.yaml`, builds the Dockerfile and starts the service.
-3. Check the URLs Render assigned. If a name was taken, Render adds a suffix
-   (e.g. `hospital-bulk-ui-x7k2`). In that case set `VITE_API_URL` on the UI
-   and `CORS_ORIGINS` on the API to the real URLs, and redeploy both. The UI
-   needs a rebuild because the URL is fixed at build time.
-4. Open the API's `/health` and `/docs`, then the UI. Its dashboard should
-   show "Processing service · Online".
+3. Open `https://<service-name>.onrender.com/` for the web UI (its dashboard
+   should show "Processing service · Online"), and `/docs` for the API.
 
 Free-tier behaviour to expect:
 

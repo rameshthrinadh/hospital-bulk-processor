@@ -5,13 +5,14 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import List, Optional
 
 import httpx
 from fastapi import (APIRouter, FastAPI, File, HTTPException, Query, Request, Response,
                      UploadFile, WebSocket, WebSocketDisconnect)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from app.config import Settings, settings
 from app.csv_parser import CSVValidationError, HospitalRow, parse_hospital_csv
@@ -182,9 +183,30 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
-@router.get("/", include_in_schema=False)
-async def root() -> RedirectResponse:
+async def _docs_redirect() -> RedirectResponse:
     return RedirectResponse("/docs")
+
+
+def _add_frontend(app: FastAPI, directory: str) -> None:
+    """Serve the built web UI from this service, so one URL hosts both the UI
+    and the API it calls (no CORS, no API URL to configure). Paths that aren't
+    files get index.html, and the UI's client-side router takes over."""
+    root = Path(directory).resolve()
+    index = root / "index.html"
+    if not index.is_file():
+        raise ValueError(f"FRONTEND_DIR {directory!r} has no index.html")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def frontend(path: str) -> FileResponse:
+        if path.split("/")[0] == "hospitals":
+            raise HTTPException(404, "Not Found")  # unknown API paths stay JSON 404s
+        file = (root / path).resolve()
+        if path and file.is_file() and file.is_relative_to(root):
+            # Built assets have content hashes in their names.
+            immutable = path.startswith("assets/")
+            headers = {"Cache-Control": "public, max-age=31536000, immutable"} if immutable else None
+            return FileResponse(file, headers=headers)
+        return FileResponse(index)
 
 
 async def _csv_error_handler(request: Request, exc: CSVValidationError) -> JSONResponse:
@@ -241,6 +263,11 @@ def create_app(
                            allow_methods=["GET", "POST"], allow_headers=["*"])
     app.add_exception_handler(CSVValidationError, _csv_error_handler)
     app.include_router(router)
+    # Last, so the catch-all UI route never shadows an API route.
+    if cfg.frontend_dir:
+        _add_frontend(app, cfg.frontend_dir)
+    else:
+        app.add_api_route("/", _docs_redirect, include_in_schema=False)
     return app
 
 

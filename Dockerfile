@@ -1,5 +1,15 @@
-# Single stage on purpose: every dependency installs from a prebuilt wheel,
-# so there is no compiler toolchain for a multi-stage build to strip out.
+# Stage 1 builds the web UI to static files. The app serves them at "/", so
+# one service (one URL) hosts both the UI and the API it calls.
+FROM node:22-slim AS frontend
+
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+RUN npm run build
+
+# Stage 2 is the app. Python dependencies all install from prebuilt wheels,
+# so there is no compiler toolchain to strip out here.
 FROM python:3.12-slim
 
 # PYTHONUNBUFFERED: logs reach `docker logs` / Render immediately.
@@ -19,6 +29,8 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY app ./app
+COPY --from=frontend /frontend/dist ./frontend
+ENV FRONTEND_DIR=/app/frontend
 
 # Run as an unprivileged user: a compromised process can't modify the image's
 # files or bind privileged ports.

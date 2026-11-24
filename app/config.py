@@ -52,6 +52,10 @@ class Settings:
     cors_origins: Tuple[str, ...] = _env_list(
         "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
 
+    # Built web UI (frontend/dist) to serve at "/". Empty: "/" redirects to
+    # the API docs instead. Set by the Dockerfile.
+    frontend_dir: str = os.environ.get("FRONTEND_DIR", "")
+
     def __post_init__(self) -> None:
         # Fail at startup, not mid-batch: e.g. a concurrency of 0 would make
         # every outbound request wait forever on the semaphore.
