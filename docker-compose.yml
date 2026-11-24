@@ -1,0 +1,20 @@
+services:
+  bulk-processor:
+    build: .
+    image: hospital-bulk-processor:local
+    ports:
+      - "${HOST_PORT:-8000}:8000"
+    # Every setting is an environment variable; values here fall back to the
+    # app's defaults and can be overridden from the shell or a .env file.
+    environment:
+      PORT: "8000"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DIRECTORY_API_URL: ${DIRECTORY_API_URL:-https://hospital-directory.onrender.com}
+      DIRECTORY_MAX_CONCURRENCY: ${DIRECTORY_MAX_CONCURRENCY:-10}
+      DIRECTORY_READ_TIMEOUT: ${DIRECTORY_READ_TIMEOUT:-20}
+      DIRECTORY_MAX_ATTEMPTS: ${DIRECTORY_MAX_ATTEMPTS:-3}
+      SHUTDOWN_GRACE_SECONDS: ${SHUTDOWN_GRACE_SECONDS:-5}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+    # Mirror Render: SIGTERM, then SIGKILL after 30s.
+    stop_grace_period: 30s
+    restart: unless-stopped
